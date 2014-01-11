@@ -14,9 +14,16 @@ class contactlist:
 			userinfo.data['name'] = "(none)"
 		self._list.append( (userinfo, days_since_last_post, status) )
 	
+	# Adds a tuple that is already from one list of this kind
+	def add_from_list(self, user):
+		self._list.append( user )
+	
 	# Sorts the list by number of posts, descending
 	def get_sorted(self):
 		return sorted(self._list, key=lambda c: c[1], reverse=True)
+		
+	def get_list(self):
+		return self._list
 	
 	def save_as_csv(self, filename):
 		with open(filename, 'w', newline='') as csvfile:
@@ -29,7 +36,7 @@ class contactlist:
 		csvfile.close()
 	
 	def load_from_csv(self, filename):
-		with open(filename, 'w', newline='') as csvfile:
+		with open(filename, 'r', newline='') as csvfile:
 			self._list = [] # We load a fresh list
 			readfile = csv.reader(csvfile, delimiter=',', quotechar='"')
 			

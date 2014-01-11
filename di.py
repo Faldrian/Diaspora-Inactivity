@@ -8,6 +8,7 @@ import datetime
 import diaspy
 import contact_storage
 import json #debug
+import requests
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
 	description="""Manage your Diaspora-Contact-List: Clean old Contacts.
@@ -41,9 +42,13 @@ current_datetime = datetime.datetime.utcnow().replace(tzinfo=dateutil.tz.tzutc()
 config = configparser.ConfigParser()
 config.read('config.ini')
 
+# Filenames
+file_list = "userlist.csv"
+file_select = "userselect.csv"
+
 
 ### Reads the list of contacts from a diaspora-Account and saved them to a csv-file
-def examine_user_list():
+def examine_user_list(outputfile):
 	# Connect
 	con = diaspy.connection.Connection(config['Diaspora']['pod'], config['Diaspora']['username'], config['Diaspora']['password'])
 	con.login()
@@ -59,12 +64,18 @@ def examine_user_list():
 	total_num = len(result)
 	current_num = 0
 
-	for current_contact in result[7:15]:
+	for current_contact in result[7:30]: #DEBUG!
 		current_num += 1
 		print("{0} / {1}".format(current_num, total_num), end="")
 		
 		try:
 			current_contact.fetchhandle()
+		except requests.exceptions.SSLError as err:
+			print(" SSL-Error fetching User ({0}). Skipping.".format(current_contact['handle']))
+			continue
+		except requests.exceptions.ConnectionError as err:
+			print(" Connection-Error fetching User ({0}). Skipping.".format(current_contact['handle']))
+			continue
 		except Exception as err:
 			if err.args[0].endswith("410"):
 				# This contact has closed it's diaspora-account.
@@ -74,30 +85,70 @@ def examine_user_list():
 			else:
 				pass # We want to know what else could go wrong
 		
-
 		# Is there any post?
 		if(len(current_contact.stream) > 0):
 			# Get date of last post
 			last_post_date = dateutil.parser.parse(current_contact.stream[0]['created_at'])
-
-		if(last_post_date is not None):
 			days_since_last_post = (current_datetime - last_post_date).days
 		else:
 			days_since_last_post = 10000000 # 10 Millionen ... da kommen wir nie hin.
 
 		contact_list.add(current_contact, days_since_last_post, 200)
-		print("{0} [ {1} ] --> Days since last post: {2}".format(current_contact['name'], current_contact['handle'], days_since_last_post))
+		print(" {0} [ {1} ] --> Days since last post: {2}".format(current_contact['name'], current_contact['handle'], days_since_last_post))
 
-	contact_list.save_as_csv("userlist.csv")
-	print("Userlist saved to userlist.csv")
+	contact_list.save_as_csv(outputfile)
+	print("Userlist saved to " + outputfile)
 
+
+### Filters the userlist and selects users
+def select_users(inputfile, outputfile, account_closed, min_days):
+	# Get users from storage
+	contact_list = contact_storage.contactlist()
+	contact_list.load_from_csv(inputfile)
+	
+	# Open selected list
+	select_list = contact_storage.contactlist()
+	
+	usercounter = 0
+	for cur_user in contact_list.get_list():
+		# Account is closed?
+		if account_closed and int(cur_user[2]) == 410:
+			select_list.add_from_list(cur_user)
+			usercounter += 1
+			continue
+		
+		# Account is too old?
+		if min_days is not None and int(cur_user[1]) >= min_days:
+			select_list.add_from_list(cur_user)
+			usercounter += 1
+			continue
+	
+	select_list.save_as_csv(outputfile)
+	print("Selection saved to " + outputfile + ", selected " + str(usercounter) + " Accounts.")
+
+def notify_users(inputfile):
+	# Show a List of users we want to notify and request any response from.
+
+
+def remove_users(inputfile):
+	# Show a List of users we want to remove and request "ok"
 
 
 ### Start the Tool
 args = parser.parse_args()
 
-if(args.action == 'select'):
-	print("hallo")
+if args.action == 'list':
+	examine_user_list(file_list)
+
+if args.action == 'select':
+	select_users(file_list, file_select, args.account_closed, args.min_days)
+
+if args.action == 'notify':
+	notify_users(file_select)
+
+if args.action == 'remove':
+	remove_users(file_select)
+
 
 print(args)
 exit()
