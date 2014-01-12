@@ -51,6 +51,7 @@ file_select = "userselect.csv"
 def examine_user_list(outputfile):
 	# Connect
 	con = diaspy.connection.Connection(config['Diaspora']['pod'], config['Diaspora']['username'], config['Diaspora']['password'])
+	con.set_verify_SSL(False)
 	con.login()
 
 	# Storage for our findings
@@ -60,11 +61,11 @@ def examine_user_list(outputfile):
 	contacts = diaspy.people.Contacts(con)
 	result = contacts.get()
 	print("Number of Contacts: {0}".format(len(result)))
-
+	
 	total_num = len(result)
 	current_num = 0
 
-	for current_contact in result[7:30]: #DEBUG!
+	for current_contact in result:
 		current_num += 1
 		print("{0} / {1}".format(current_num, total_num), end="")
 		
@@ -92,7 +93,7 @@ def examine_user_list(outputfile):
 			days_since_last_post = (current_datetime - last_post_date).days
 		else:
 			days_since_last_post = 10000000 # 10 Millionen ... da kommen wir nie hin.
-
+		
 		contact_list.add(current_contact, days_since_last_post, 200)
 		print(" {0} [ {1} ] --> Days since last post: {2}".format(current_contact['name'], current_contact['handle'], days_since_last_post))
 
@@ -127,11 +128,81 @@ def select_users(inputfile, outputfile, account_closed, min_days):
 	print("Selection saved to " + outputfile + ", selected " + str(usercounter) + " Accounts.")
 
 def notify_users(inputfile):
+	print("Tschuldigung.")
 	# Show a List of users we want to notify and request any response from.
 
 
 def remove_users(inputfile):
-	# Show a List of users we want to remove and request "ok"
+	# Connect
+	con = diaspy.connection.Connection(config['Diaspora']['pod'], config['Diaspora']['username'], config['Diaspora']['password'])
+	con.set_verify_SSL(False)
+	con.login()
+	
+	# Load selected users
+	print("Loading Selection-List")
+	remove_list = contact_storage.contactlist()
+	remove_list.load_from_csv(inputfile)
+	
+	# Show a List of users we want to remove and request "YES"
+	print("The following Diaspora-Accounts will be removed from your contacts:\n")
+	for remove_list_user in remove_list.get_list():
+		print("{0:40} ({1})".format(remove_list_user[0]['name'], remove_list_user[0]['handle']))
+	
+	confirmation = input("\nType 'YES' to continue: ")
+	if(confirmation != "YES"):
+		print("Aborted.")
+		return
+	
+	# Build a list only containing handles of users to remove
+	remove_list_handles = []
+	for remove_list_user in remove_list.get_list():
+		remove_list_handles.append(remove_list_user[0]['handle'])
+	
+	# Get all Contacts and create a guid --> handle dictionary
+	print("Build cache for user-guids")
+	guid_to_handle = {}
+	contacts = diaspy.people.Contacts(con)
+	for contact in contacts.get():
+		guid_to_handle[contact.data['guid']] = contact.data['handle']
+	
+	
+	# Get all Aspects of this Account
+	print("Get all Aspects of Diaspora-Account")
+	userdata = con.getUserData()
+	aspects = userdata['aspects']
+	
+	# Iterate all Aspects, if there is a guid that translates to a handle that is on the remove_list, remove the user
+	for current_aspect in aspects:
+		aspect_obj = diaspy.models.Aspect(con, current_aspect['id'])
+		print(">>> Working on Aspect {0}".format(aspect_obj.name))
+		for aspect_user_guid in aspect_obj.getUsers():
+			# Check if this user is really one of my users ... there is a bug in Diaspora, "getUsers" shows WAY to many users!
+			if aspect_user_guid not in guid_to_handle:
+				continue
+			aspect_user_handle = guid_to_handle[aspect_user_guid]
+			
+			if aspect_user_handle in remove_list_handles:
+				
+				aspect_user_id = None
+				try:
+					aspect_user_obj = diaspy.people.User(con, guid=aspect_user_guid, handle=aspect_user_handle, fetch='data')
+					aspect_user_id = aspect_user_obj.data['id']
+				except diaspy.errors.UserError as err:
+					print(err)
+					print("--> Retrying using another Method.")
+					# Retry fetching "posts" instead
+					try:
+						aspect_user_obj = diaspy.people.User(con, guid=aspect_user_guid, handle=aspect_user_handle, fetch='posts')
+						aspect_user_id = aspect_user_obj.data['id']
+					except Exception as err:
+						print(err)
+						print(":-( :-( :-( Giving up. Skipping to the next.")
+						continue
+				
+				print("Remove {0} from Aspect {1}, internal ID={2}".format(aspect_user_handle, aspect_obj.name, aspect_user_id))
+				#aspect_obj.removeUser(aspect_user_id)
+	
+	
 
 
 ### Start the Tool
@@ -149,29 +220,3 @@ if args.action == 'notify':
 if args.action == 'remove':
 	remove_users(file_select)
 
-
-print(args)
-exit()
-
-
-
-
-#print("Days since last post: {0}".format(days_since_last_post))
-#	print("No public posts.")
-
-#print(json.dumps(result[0].stream[0]._data, sort_keys=True, indent=2))
-
-
-
-# Add Aspect
-#diaspy.streams.Aspects(test_connection).add(testconf.test_aspect_name_fake)
-#testconf.test_aspect_id = diaspy.streams.Aspects(test_connection).add(testconf.test_aspect_name).id
-
-# Remove Aspect
-#aspects = diaspy.streams.Aspects(test_connection)
-#for i in test_connection.getUserData()['aspects']:
-#	if i['name'] == testconf.test_aspect_name:
-#		print(i['id'], end=' ')
-#		aspects.remove(id=i['id'])
-#		break
-             
